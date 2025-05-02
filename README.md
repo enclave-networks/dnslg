@@ -89,7 +89,7 @@ DNSLG requires a list of hostnames to query. You can:
 
 ```
 C:\Git\dnslg\src>dotnet run
-Using DNS source list: C:\Git\enclave\dnslg\dns-source-lists\tranco-list-top-1m.csv (limit: 20,000 lines)
+Using DNS source list: C:\Git\dnslg\dns-source-lists\tranco-list-top-1m.csv (limit: 20,000 lines)
 Loaded 20,000 hostnames
 Press 'P' to toggle scheduling (currently ON). Press 'V' to toggle verbose output. Ctrl+C to stop
 
