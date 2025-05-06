@@ -6,6 +6,7 @@ class DnsResolverProgram
 {
     public static readonly List<string> sourceListFileNames = ["hosts", "tranco-list-top-1m" ];
     public static readonly List<string> sourceListExtension = ["txt", "csv"];
+    public static readonly List<string> sourceListDirectories = ["../dns-source-lists", "."];
 
     /// <summary>
     /// Maximum number of entries we'll read from a file to control memory usage. 
@@ -252,9 +253,18 @@ class DnsResolverProgram
         // No source list provided, search for known source list files in the current directory
         if (sourceList == null)
         {
-            FileInfo? foundFile = sourceListFileNames
-                .SelectMany(file => sourceListExtension.Select(ext =>
-                    new FileInfo(Path.Combine(Directory.GetCurrentDirectory(), $"{file}.{ext}"))))
+            // Search for source list files in the specified directories with the given names and extension combinations
+            // Starts with your list of directories
+            // For each directory, creates combinations with every filename
+            // For each filename, creates combinations with every extension
+            // Constructs full file paths by combining directory, filename, and extension
+            // Return the first file that exists
+            FileInfo? foundFile = sourceListDirectories
+                .SelectMany(dir =>
+                    sourceListFileNames
+                        .SelectMany(file =>
+                            sourceListExtension.Select(ext =>
+                                new FileInfo(Path.Combine(dir, $"{file}.{ext}")))))
                 .FirstOrDefault(fi => fi.Exists);
 
             // Only assign if a file was actually found
