@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -39,18 +40,33 @@ class DnsResolverProgram
     private static long _queryMinDuration;
     private static long _querySumOfDurations;
 
+
+
+    // Add a sliding window to track recent query results
+    private static readonly ConcurrentQueue<bool> _recentQueryResults = new();
+    private static readonly ConcurrentQueue<double> _recentAvgDurations = new();
+    private static readonly ConcurrentQueue<long> _recentInFlightQueryTotals = new();
+
+    private static int _recentResultsWindowSize = 300; // Track last N queries
+    private static int _recentAvgDurationWindowSize = 8; // Track last N average resolve durations
+    private static int _recentInFlightWindowSize = 8; // Track last N in-flight queries
+
+
+
+    private static long _exitStateQueriesInFlight;
+
     private static volatile bool isPaused = false;
     private static volatile bool isVerbose = false;
 
-    private static readonly object _stateLock = new object();
+    private static readonly object _stateLock = new();
 
-    private static async Task Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         var options = ParseArguments(args);
 
         isVerbose = options.IsVerbose;
 
-        if (!LoadDnsNameSourceList(options.SourceListFile)) return;
+        if (!LoadDnsNameSourceList(options.SourceListFile)) return ExitCode.Error;
 
         Console.CancelKeyPress += (sender, e) =>
         {
@@ -64,7 +80,6 @@ class DnsResolverProgram
         var tcs = new TaskCompletionSource<bool>();
 
         cts.Token.Register(() => {
-            Console.WriteLine("Test duration elapsed, shutting down...");
             tcs.TrySetResult(true);
         });
 
@@ -89,6 +104,11 @@ class DnsResolverProgram
             Console.WriteLine($"  Query timeout. . . : {options.QueryTimeout:N0} ms");
             Console.WriteLine($"  Test duration. . . : {(options.Duration > 0 ? $"{options.Duration:N0} ms" : "Until stopped")}");
             Console.WriteLine();
+
+            _recentResultsWindowSize = Math.Max(options.QueryConcurrency * 6, 10);
+
+            // TODO this won't work when duration is infinite!
+            //_recentAvgDurationWindowSize = Math.Max(Convert.ToInt32((options.QueryConcurrency * options.QueryInterval) * 0.3), 3);
 
             // Start a background thread to monitor for key presses.
             new Thread(() => {
@@ -143,14 +163,15 @@ class DnsResolverProgram
             timer.Dispose();
 
             _dnsReportTimer.Dispose();
+
+            // Compute an exit code based on test results
+            return ReportExitCode(options);
         }
         catch (OperationCanceledException)
         {
             Console.WriteLine("Operation was canceled.");
-        }
-        finally
-        {
-            Console.WriteLine("Finished.");
+
+            return ExitCode.Canceled;
         }
     }
 
@@ -325,6 +346,10 @@ class DnsResolverProgram
 
         var errorMessage = string.Empty;
 
+        var querySuccess = false;
+
+        var isCancelled = false;
+
         IEnumerable<string> answer = [];
 
         try
@@ -348,6 +373,8 @@ class DnsResolverProgram
                 answer = addresses.Select(addr => addr.ToString());
 
                 Interlocked.Increment(ref _querySuccessCount);
+                
+                querySuccess = true;
             }
             else
             {
@@ -366,6 +393,10 @@ class DnsResolverProgram
             // expected when SIGTERM arrives, swallow
             Interlocked.Increment(ref _queryExceptionCount);
 
+            // cancelled queries don't count
+
+            isCancelled = true;
+
             errorMessage = "OperationCanceled";
         }
         catch (Exception ex)
@@ -376,38 +407,46 @@ class DnsResolverProgram
         }
         finally
         {
-            queryDuration.Stop();
-
-            var duration = (uint)queryDuration.ElapsedMilliseconds;
-            var currentMax = Interlocked.Read(ref _queryMaxDuration);
-            var currentMin = Interlocked.Read(ref _queryMinDuration);
-
-            Interlocked.Decrement(ref _dnsQueriesInFlight);
-
-            Interlocked.Increment(ref _dnsQueriesCompletedPerInterval);
-
-            Interlocked.Add(ref _querySumOfDurations, duration);
-
-            if (duration > currentMax)
+            if (!isCancelled)
             {
-                Interlocked.Exchange(ref _queryMaxDuration, duration);
-            }
+                queryDuration.Stop();
 
-            if (duration < currentMin)
-            {
-                Interlocked.Exchange(ref _queryMinDuration, duration);
-            }
+                var duration = (uint)queryDuration.ElapsedMilliseconds;
+                var currentMax = Interlocked.Read(ref _queryMaxDuration);
+                var currentMin = Interlocked.Read(ref _queryMinDuration);
 
-            if (isVerbose)
-            {
-                if (string.IsNullOrEmpty(errorMessage) == false)
+                Interlocked.Decrement(ref _dnsQueriesInFlight);
+
+                Interlocked.Increment(ref _dnsQueriesCompletedPerInterval);
+
+                Interlocked.Add(ref _querySumOfDurations, duration);
+
+                if (duration > currentMax)
                 {
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}]    {hostname,-64} {duration,8:N0} ms {errorMessage}");
+                    Interlocked.Exchange(ref _queryMaxDuration, duration);
                 }
-                else
+
+                if (duration < currentMin)
                 {
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}]    {hostname,-64} {duration,8:N0} ms [{string.Join(", ", answer.Select(item => item.Trim()))}]");
+                    Interlocked.Exchange(ref _queryMinDuration, duration);
                 }
+
+                if (isVerbose)
+                {
+                    if (string.IsNullOrEmpty(errorMessage) == false)
+                    {
+                        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}]    {hostname,-64} {duration,8:N0} ms {errorMessage}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}]    {hostname,-64} {duration,8:N0} ms [{string.Join(", ", answer.Select(item => item.Trim()))}]");
+                    }
+                }
+
+                // Capture the state of queries in flight for final reporting, before the tasks are all canceled.
+                _exitStateQueriesInFlight = Math.Max(Interlocked.Read(ref _dnsQueriesInFlight), _exitStateQueriesInFlight);
+
+                RecordQueryResult(querySuccess);
             }
         }
     }
@@ -449,6 +488,9 @@ class DnsResolverProgram
         var averageDuration = queriesCompletedPerInterval > 0 ? (double)querySumOfDurations / queriesCompletedPerInterval : 0;
         var durationMs = $"{Math.Round(averageDuration):N0} ms";
 
+        RecordAverageDuration(averageDuration);
+        RecordInFlightQueryCount(queriesInFlight);
+
         // clamp min duration to 0 if all in-flights queries are yet to complete (so no minimum duration is known)
         queryMinDuration = queryMinDuration == long.MaxValue ? 0 : queryMinDuration;
 
@@ -466,5 +508,193 @@ class DnsResolverProgram
             );
         }
     }
-}
 
+
+
+
+
+    /// <summary>
+    /// Records the success or failure status of a DNS query in a sliding window queue.
+    /// This is used to track recent performance for determining exit codes.
+    /// </summary>
+    /// <param name="success">True if the query resolved successfully within timeout; false otherwise.</param>
+
+    private static void RecordQueryResult(bool success)
+    {
+        _recentQueryResults.Enqueue(success);
+
+        while (_recentQueryResults.Count > _recentResultsWindowSize)
+        {
+            _recentQueryResults.TryDequeue(out _);
+        }
+    }
+    
+    private static void RecordAverageDuration(double duation)
+    {
+        _recentAvgDurations.Enqueue(duation);
+
+        while (_recentAvgDurations.Count > _recentAvgDurationWindowSize)
+        {
+            _recentAvgDurations.TryDequeue(out _);
+        }
+    }
+
+    private static void RecordInFlightQueryCount(long inFlightCount)
+    {
+        _recentInFlightQueryTotals.Enqueue(inFlightCount);
+
+        while (_recentInFlightQueryTotals.Count > _recentInFlightWindowSize)
+        {
+            _recentInFlightQueryTotals.TryDequeue(out _);
+        }
+    }
+
+    /// <summary>
+    /// Calculates the failure rate of DNS queries based on the most recent queries.
+    /// Uses a sliding window of the last <see cref="_recentResultsWindowSize"/> queries.
+    /// Includes all types of failures: timeouts, DNS errors, and exceptions.
+    /// </summary>
+    /// <returns>A value between 0.0 and 1.0 representing the proportion of recent queries that failed. Higher is worse.
+    /// </returns>
+    private static double CalculateRecentFailureRate()
+    {
+        if (_recentQueryResults.Count == 0)
+        {
+            return 0;
+        }
+
+        // Count queries where success is false (any kind of failure)
+        return (double)_recentQueryResults.Count(success => !success) / _recentQueryResults.Count;
+    }
+
+
+    /// <summary>
+    /// Analyzes a queue of values to detect if there's an increasing trend.
+    /// Uses linear regression to calculate the slope of the trend line.
+    /// Works with any numeric type that can be converted to double.
+    /// </summary>
+    /// <typeparam name="T">The numeric type stored in the queue</typeparam>
+    /// <param name="queue">Queue of values to analyse</param>
+    /// <param name="converter">Optional function to convert T to double. If null, Convert.ToDouble will be used.</param>
+    /// <param name="trendThreshold">Percentage threshold to consider a trend as increasing (default: 30%)</param>
+    /// <returns>
+    /// A tuple containing:
+    /// - Whether there is a significant increasing trend (bool)
+    /// - The percentage increase over the window (double)
+    /// - The slope of the trend line (double)
+    /// </returns>
+    private static (bool isIncreasing, double percentageIncrease, double slope) AnalyzeValueTrend<T>(ConcurrentQueue<T> queue, Func<T, double>? converter = null, double trendThreshold = 30)
+    {
+        // Need at least 3 data points for a meaningful trend
+        if (queue.Count < 3)
+        {
+            return (false, 0, 0);
+        }
+
+        // Default converter uses Convert.ToDouble
+        converter ??= value => Convert.ToDouble(value);
+
+        // Convert values to double array
+        var values = queue.Select(converter).ToArray();
+        int n = values.Length;
+
+        // Simple linear regression to find slope
+        // y = mx + b where m is the slope
+        double sumX = 0;
+        double sumY = 0;
+        double sumXY = 0;
+        double sumX2 = 0;
+
+        for (int i = 0; i < n; i++)
+        {
+            sumX += i;
+            sumY += values[i];
+            sumXY += i * values[i];
+            sumX2 += i * i;
+        }
+
+        double avgX = sumX / n;
+        double avgY = sumY / n;
+
+        // Calculate slope (m)
+        double slope = 0;
+        double denominator = sumX2 - n * avgX * avgX;
+
+        if (Math.Abs(denominator) > 0.0001) // Avoid division by zero
+        {
+            slope = (sumXY - n * avgX * avgY) / denominator;
+        }
+
+        // Calculate percentage increase over the window
+        double firstValue = values.First();
+        double lastValue = values.Last();
+
+        // Avoid division by zero
+        double percentageIncrease = 0;
+        if (Math.Abs(firstValue) > 0.0001)
+        {
+            percentageIncrease = (lastValue - firstValue) / firstValue * 100;
+        }
+
+        // Determine if there's a significant increasing trend
+        // Consider it significant if:
+        // 1. The slope is positive and
+        // 2. The percentage increase is substantial (e.g., more than the specified threshold)
+        bool isIncreasing = slope > 0 && percentageIncrease > trendThreshold;
+
+        return (isIncreasing, percentageIncrease, slope);
+    }
+
+    /// <summary>
+    /// Determines the appropriate exit code based on DNS resolver performance.
+    /// Analyzes timeout rates and in-flight query ratios to detect resolver failure conditions.
+    /// </summary>
+    /// <returns>
+    /// An exit code indicating test result.
+    /// </returns>
+    private static int ReportExitCode(CommandLineOptions options)
+    {
+        var isFailure = false;
+        var recentFailureRate = CalculateRecentFailureRate();
+
+        var (durationIsIncreasing, durationPercentageIncrease, durationSlope) = AnalyzeValueTrend(_recentAvgDurations);
+        var (inFlightIsIncreasing, inFlightPercentageIncrease, inFlightSlope) = AnalyzeValueTrend(_recentInFlightQueryTotals, value => value, 10);
+
+        // Fail on hgih query timeout rate, and adjust exit code.
+        if (recentFailureRate >= 0.95) // 
+        {
+            Console.WriteLine($"Failure: Resolver saturated with {recentFailureRate:P0} failure rate. Consider reducing queries per second load.");
+            isFailure = true;
+        }
+        else if (recentFailureRate >= 0.50)
+        {
+            Console.WriteLine($"Unstable: High query failure rate: {recentFailureRate:P0} of queries (> 50%). Consider increasing query timeout (--timeout=N).");
+            isFailure = true;
+        }
+
+        // Fail on increasing trends as a sign of building instability, and adjust exit code.
+        if (_recentAvgDurations.Count >= 3)
+        {
+            if (durationIsIncreasing)
+            {
+                Console.WriteLine($"Unstable: Increasing resolution latency (Change: {durationPercentageIncrease:F1}%, Slope: {durationSlope:F2} ms/interval). Consider extending test duration (--duration=N).");
+                isFailure = true;
+            }
+        }
+
+        if (_recentInFlightQueryTotals.Count >= 3)
+        {
+            if (inFlightIsIncreasing)
+            {
+                Console.WriteLine($"Unstable: Increasing query backlog size (Change: {inFlightPercentageIncrease:F1}%, Slope: {inFlightSlope:F2} queries/interval). Consider extending test duration (--duration=N).");
+                isFailure = true;
+            }
+        }
+
+        Console.WriteLine("Test complete.");
+
+        return isFailure 
+            ? ExitCode.Error 
+            : ExitCode.Success;
+    }
+}
