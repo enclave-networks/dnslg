@@ -33,11 +33,11 @@ dotnet run -- [options]
 
 ## Command Line Options
 
+- `--list=FILE`: Path to a file containing hostnames to query (required)
 - `--concurrency=N`: Number of concurrent DNS queries per interval (default: 1)
 - `--interval=N`: Time in milliseconds between query batches (default: 1000)
 - `--timeout=N`: Maximum time in milliseconds to wait for a DNS response (default: 3000)
 - `--duration=N`: Test duration in milliseconds (-1 for unlimited, default: -1)
-- `--list=FILE`: Path to a file containing hostnames to query (optional)
 - `--verbose`: Enable detailed output for each query
 
 ## Interactive Controls
