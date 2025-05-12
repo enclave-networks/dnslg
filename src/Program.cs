@@ -40,8 +40,6 @@ class DnsResolverProgram
     private static long _queryMinDuration;
     private static long _querySumOfDurations;
 
-
-
     // Add a sliding window to track recent query results
     private static readonly ConcurrentQueue<bool> _recentQueryResults = new();
     private static readonly ConcurrentQueue<double> _recentAvgDurations = new();
@@ -51,8 +49,9 @@ class DnsResolverProgram
     private static int _recentAvgDurationWindowSize = 8; // Track last N average resolve durations
     private static int _recentInFlightWindowSize = 8; // Track last N in-flight queries
 
-
-
+    /// <summary>
+    /// Captures the number of queries in flight as the test ends or is cancelled, before all of the workers exit.
+    /// </summary>
     private static long _exitStateQueriesInFlight;
 
     private static volatile bool isPaused = false;
@@ -106,9 +105,6 @@ class DnsResolverProgram
             Console.WriteLine();
 
             _recentResultsWindowSize = Math.Max(options.QueryConcurrency * 6, 10);
-
-            // TODO this won't work when duration is infinite!
-            //_recentAvgDurationWindowSize = Math.Max(Convert.ToInt32((options.QueryConcurrency * options.QueryInterval) * 0.3), 3);
 
             // Start a background thread to monitor for key presses.
             new Thread(() => {
@@ -491,7 +487,7 @@ class DnsResolverProgram
         RecordAverageDuration(averageDuration);
         RecordInFlightQueryCount(queriesInFlight);
 
-        // clamp min duration to 0 if all in-flights queries are yet to complete (so no minimum duration is known)
+        // Clamp min duration to 0 if all in-flights queries are yet to complete (so no minimum duration is known).
         queryMinDuration = queryMinDuration == long.MaxValue ? 0 : queryMinDuration;
 
         if (queriesCompletedPerInterval > 0)
@@ -509,16 +505,10 @@ class DnsResolverProgram
         }
     }
 
-
-
-
-
     /// <summary>
-    /// Records the success or failure status of a DNS query in a sliding window queue.
-    /// This is used to track recent performance for determining exit codes.
+    /// Record the success or failure status of a DNS query in a sliding window queue.
     /// </summary>
     /// <param name="success">True if the query resolved successfully within timeout; false otherwise.</param>
-
     private static void RecordQueryResult(bool success)
     {
         _recentQueryResults.Enqueue(success);
@@ -558,91 +548,13 @@ class DnsResolverProgram
     /// </returns>
     private static double CalculateRecentFailureRate()
     {
-        if (_recentQueryResults.Count == 0)
+        if (_recentQueryResults.IsEmpty)
         {
             return 0;
         }
 
-        // Count queries where success is false (any kind of failure)
+        // Count any queries where the success outcome is false (therefore including any kind of failure).
         return (double)_recentQueryResults.Count(success => !success) / _recentQueryResults.Count;
-    }
-
-
-    /// <summary>
-    /// Analyzes a queue of values to detect if there's an increasing trend.
-    /// Uses linear regression to calculate the slope of the trend line.
-    /// Works with any numeric type that can be converted to double.
-    /// </summary>
-    /// <typeparam name="T">The numeric type stored in the queue</typeparam>
-    /// <param name="queue">Queue of values to analyse</param>
-    /// <param name="converter">Optional function to convert T to double. If null, Convert.ToDouble will be used.</param>
-    /// <param name="trendThreshold">Percentage threshold to consider a trend as increasing (default: 30%)</param>
-    /// <returns>
-    /// A tuple containing:
-    /// - Whether there is a significant increasing trend (bool)
-    /// - The percentage increase over the window (double)
-    /// - The slope of the trend line (double)
-    /// </returns>
-    private static (bool isIncreasing, double percentageIncrease, double slope) AnalyzeValueTrend<T>(ConcurrentQueue<T> queue, Func<T, double>? converter = null, double trendThreshold = 30)
-    {
-        // Need at least 3 data points for a meaningful trend
-        if (queue.Count < 3)
-        {
-            return (false, 0, 0);
-        }
-
-        // Default converter uses Convert.ToDouble
-        converter ??= value => Convert.ToDouble(value);
-
-        // Convert values to double array
-        var values = queue.Select(converter).ToArray();
-        int n = values.Length;
-
-        // Simple linear regression to find slope
-        // y = mx + b where m is the slope
-        double sumX = 0;
-        double sumY = 0;
-        double sumXY = 0;
-        double sumX2 = 0;
-
-        for (int i = 0; i < n; i++)
-        {
-            sumX += i;
-            sumY += values[i];
-            sumXY += i * values[i];
-            sumX2 += i * i;
-        }
-
-        double avgX = sumX / n;
-        double avgY = sumY / n;
-
-        // Calculate slope (m)
-        double slope = 0;
-        double denominator = sumX2 - n * avgX * avgX;
-
-        if (Math.Abs(denominator) > 0.0001) // Avoid division by zero
-        {
-            slope = (sumXY - n * avgX * avgY) / denominator;
-        }
-
-        // Calculate percentage increase over the window
-        double firstValue = values.First();
-        double lastValue = values.Last();
-
-        // Avoid division by zero
-        double percentageIncrease = 0;
-        if (Math.Abs(firstValue) > 0.0001)
-        {
-            percentageIncrease = (lastValue - firstValue) / firstValue * 100;
-        }
-
-        // Determine if there's a significant increasing trend
-        // Consider it significant if:
-        // 1. The slope is positive and
-        // 2. The percentage increase is substantial (e.g., more than the specified threshold)
-        bool isIncreasing = slope > 0 && percentageIncrease > trendThreshold;
-
-        return (isIncreasing, percentageIncrease, slope);
     }
 
     /// <summary>
@@ -657,8 +569,8 @@ class DnsResolverProgram
         var isFailure = false;
         var recentFailureRate = CalculateRecentFailureRate();
 
-        var (durationIsIncreasing, durationPercentageIncrease, durationSlope) = AnalyzeValueTrend(_recentAvgDurations);
-        var (inFlightIsIncreasing, inFlightPercentageIncrease, inFlightSlope) = AnalyzeValueTrend(_recentInFlightQueryTotals, value => value, 10);
+        var (durationIsIncreasing, durationPercentageIncrease, durationSlope) = Statistics.AnalyzeValueTrend(_recentAvgDurations);
+        var (inFlightIsIncreasing, inFlightPercentageIncrease, inFlightSlope) = Statistics.AnalyzeValueTrend(_recentInFlightQueryTotals, value => value, 10);
 
         // Fail on hgih query timeout rate, and adjust exit code.
         if (recentFailureRate >= 0.95) // 
