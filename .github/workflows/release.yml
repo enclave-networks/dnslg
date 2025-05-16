@@ -14,13 +14,13 @@ jobs:
         arch: [x64, arm64]
         include:
           - os: linux
-            rid_prefix: linux
+            platform: linux
             extension: ''
           - os: win
-            rid_prefix: win
+            platform: windows
             extension: '.exe'
           - os: macos
-            rid_prefix: osx
+            platform: osx
             extension: ''
     env:
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -44,8 +44,9 @@ jobs:
 
       - name: Build single-file binary
         run: |
-          rid="${{ matrix.rid_prefix }}-${{ matrix.arch }}"
+          rid="${{ matrix.os }}-${{ matrix.arch }}"
           output_dir="publish/${rid}"
+
           dotnet publish src/dnslg.csproj -c Release \
             -r $rid \
             --self-contained true \
@@ -53,7 +54,8 @@ jobs:
             /p:PublishTrimmed=true \
             /p:IncludeNativeLibrariesForSelfExtract=true \
             -o $output_dir
-          mv "$output_dir/dnslg${{ matrix.extension }}" "dnslg-${rid}${{ matrix.extension }}"
+
+          mv "$output_dir/dnslg${{ matrix.extension }}" "dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}"
         shell: bash
 
       - name: Upload binary to 'latest' GitHub release
@@ -63,7 +65,7 @@ jobs:
           name: Latest Build
           draft: false
           prerelease: false
-          files: dnslg-${{ matrix.rid_prefix }}-${{ matrix.arch }}${{ matrix.extension }}
+          files: dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
