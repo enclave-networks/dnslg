@@ -14,12 +14,15 @@ jobs:
         arch: [x64, arm64]
         include:
           - os: linux
+            rid_prefix: linux
             platform: linux
             extension: ''
           - os: win
+            rid_prefix: win
             platform: windows
             extension: '.exe'
           - os: macos
+            rid_prefix: osx
             platform: osx
             extension: ''
     env:
@@ -44,7 +47,7 @@ jobs:
 
       - name: Build single-file binary
         run: |
-          rid="${{ matrix.os }}-${{ matrix.arch }}"
+          rid="${{ matrix.os }}-${{ matrix.rid_prefix }}"
           output_dir="publish/${rid}"
 
           dotnet publish src/dnslg.csproj -c Release \
