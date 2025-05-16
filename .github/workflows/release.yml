@@ -56,15 +56,31 @@ jobs:
           mv "$output_dir/dnslg${{ matrix.extension }}" "dnslg-${rid}${{ matrix.extension }}"
         shell: bash
 
-      - name: Upload to 'latest' GitHub release
+      - name: Upload binary to 'latest' GitHub release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest
           name: Latest Build
           draft: false
           prerelease: false
-          files: |
-            dnslg-*
-            dns-source-lists/*
+          files: dnslg-${{ matrix.rid_prefix }}-${{ matrix.arch }}${{ matrix.extension }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-dns-lists:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Upload dns source lists to 'latest' GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+          name: Latest Build
+          draft: false
+          prerelease: false
+          files: dns-source-lists/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
