@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Delete existing release
-        run: gh release delete latest --cleanup-tag --yes || true
+        run: gh release delete latest --cleanup-tag --yes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload binary to release
         run: |
-          gh release upload latest "dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}"
+          gh release upload latest "dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
