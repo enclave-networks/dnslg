@@ -1,0 +1,54 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [linux, win, macos]
+        arch: [x64, arm64]
+    env:
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build single-file binary
+        run: |
+          rid="${{ matrix.os }}-${{ matrix.arch }}"
+          output_dir="publish/${rid}"
+          exe_name="dnslg"
+          [[ "${{ matrix.os }}" == "win" ]] && exe_name="dnslg.exe"
+          dotnet publish -c Release \
+            -r $rid \
+            --self-contained true \
+            /p:PublishSingleFile=true \
+            /p:PublishTrimmed=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true \
+            -o $output_dir
+          mv "$output_dir/$exe_name" "dnslg-${rid}${{ matrix.os == 'win' && '.exe' || '' }}"
+        shell: bash
+
+      - name: Upload to 'latest' GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+          release_name: Latest Build
+          draft: false
+          prerelease: false
+          files: |
+            dnslg-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
