@@ -56,13 +56,6 @@ jobs:
           mv "$output_dir/dnslg${{ matrix.extension }}" "dnslg-${rid}${{ matrix.extension }}"
         shell: bash
 
-      - name: Copy everything to release directory
-        run: |
-          mkdir -p release-files
-          cp dns-source-lists/* release-files/
-          cp dnslg-* release-files/
-        shell: bash
-
       - name: Upload to 'latest' GitHub release
         uses: softprops/action-gh-release@v1
         with:
@@ -70,6 +63,8 @@ jobs:
           name: Latest Build
           draft: false
           prerelease: false
-          files: release-files/*
+          files: |
+            dnslg-*
+            dns-source-lists/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
