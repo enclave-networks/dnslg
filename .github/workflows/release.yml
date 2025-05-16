@@ -69,16 +69,12 @@ jobs:
           mv "$output_dir/dnslg${{ matrix.extension }}" "dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}"
         shell: bash
 
-      - name: Upload binary to 'latest' GitHub release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: latest
-          name: Latest Build
-          draft: false
-          prerelease: false
-          files: dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}
+      - name: Upload binary to release
+        run: |
+          gh release upload latest "dnslg-${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.extension }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   upload-dns-lists:
     runs-on: ubuntu-latest
