@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Delete existing release
-        run: gh release delete latest --cleanup-tag --yes
+        run: gh release delete latest --repo ${{ github.repository }} --cleanup-tag --yes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
