@@ -97,7 +97,7 @@ class DnsResolverProgram
             // Each thread produces one query per interval.
             double queriesPerSecond = options.QueryConcurrency * (1000.0 / options.QueryInterval);
 
-            if (Console.KeyAvailable)
+            if (!Console.IsInputRedirected && Console.KeyAvailable)
             {
                 Console.WriteLine($"Press 'P' to toggle scheduling (currently ON). Press 'V' to toggle verbose output. Ctrl+C to stop");
                 Console.WriteLine();
@@ -113,7 +113,7 @@ class DnsResolverProgram
             // Start a background thread to monitor for key presses.
             new Thread(() => 
             {
-                if (Console.KeyAvailable == false)
+                if (!Console.IsInputRedirected && Console.KeyAvailable == false)
                 {
                     // We're running in an environment where the console isn't available or has been redirected
                     // (like in a service, Docker container, or when using input/output redirection), so we can't
