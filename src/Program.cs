@@ -97,12 +97,16 @@ class DnsResolverProgram
             // Each thread produces one query per interval.
             double queriesPerSecond = options.QueryConcurrency * (1000.0 / options.QueryInterval);
 
-            if (!Console.IsInputRedirected && Console.KeyAvailable)
+            if (Console.IsInputRedirected)
+            {
+                // Console input is redirected, so KeyPress is not available
+            }
+            else
             {
                 Console.WriteLine($"Press 'P' to toggle scheduling (currently ON). Press 'V' to toggle verbose output. Ctrl+C to stop");
-                Console.WriteLine();
             }
 
+            Console.WriteLine();
             Console.WriteLine($"  Query rate . . . . : {queriesPerSecond:N0} {(queriesPerSecond == 1 ? "query" : "queries")}/second");
             Console.WriteLine($"  Query timeout. . . : {options.QueryTimeout:N0} ms");
             Console.WriteLine($"  Test duration. . . : {(options.Duration > 0 ? $"{options.Duration:N0} ms" : "Until stopped")}");
@@ -113,34 +117,37 @@ class DnsResolverProgram
             // Start a background thread to monitor for key presses.
             new Thread(() => 
             {
-                if (!Console.IsInputRedirected && Console.KeyAvailable == false)
+                if (Console.IsInputRedirected)
                 {
+                    // Console input is redirected, so KeyPress is not available.
                     // We're running in an environment where the console isn't available or has been redirected
                     // (like in a service, Docker container, or when using input/output redirection), so we can't
                     // use Console.ReadKey().
                     return;
                 }
-
-                while (!cts.IsCancellationRequested)
+                else
                 {
-                    var key = Console.ReadKey(true);
-
-                    if (key.Key == ConsoleKey.P)  // 'P' for Produce toggle.
+                    while (!cts.IsCancellationRequested)
                     {
-                        lock (_stateLock)
-                        {
-                            isPaused = !isPaused;
+                        var key = Console.ReadKey(true);
 
-                            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Query scheduling {(isPaused ? "PAUSED" : "ENABLED")}");
+                        if (key.Key == ConsoleKey.P)  // 'P' for Produce toggle.
+                        {
+                            lock (_stateLock)
+                            {
+                                isPaused = !isPaused;
+
+                                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Query scheduling {(isPaused ? "PAUSED" : "ENABLED")}");
+                            }
                         }
-                    }
-                    if (key.Key == ConsoleKey.V)  // 'V' for Verbose toggle.
-                    {
-                        lock (_stateLock)
+                        if (key.Key == ConsoleKey.V)  // 'V' for Verbose toggle.
                         {
-                            isVerbose = !isVerbose;
+                            lock (_stateLock)
+                            {
+                                isVerbose = !isVerbose;
 
-                            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Verbose output {(isVerbose ? "ENABLED" : "DISABLED")}");
+                                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Verbose output {(isVerbose ? "ENABLED" : "DISABLED")}");
+                            }
                         }
                     }
                 }
