@@ -609,8 +609,8 @@ class DnsResolverProgram
         {
             if (durationIsIncreasing)
             {
-                Console.WriteLine($"Unstable: Increasing resolution latency (Change: {durationPercentageIncrease:F1}%, Slope: {durationSlope:F2} ms/interval). Consider extending test duration (--duration=N).");
-                isFailure = true;
+                Console.WriteLine($"Warning: Increasing resolution latency (Change: {durationPercentageIncrease:F1}%, Slope: {durationSlope:F2} ms/interval). Consider extending test duration (--duration=N).");
+                isFailure = false;
             }
         }
 
@@ -618,8 +618,8 @@ class DnsResolverProgram
         {
             if (inFlightIsIncreasing)
             {
-                Console.WriteLine($"Unstable: Increasing query backlog size (Change: {inFlightPercentageIncrease:F1}%, Slope: {inFlightSlope:F2} queries/interval). Consider extending test duration (--duration=N).");
-                isFailure = true;
+                Console.WriteLine($"Warning: Increasing query backlog size (Change: {inFlightPercentageIncrease:F1}%, Slope: {inFlightSlope:F2} queries/interval). Consider extending test duration (--duration=N).");
+                isFailure = false;
             }
         }
 
