@@ -73,8 +73,14 @@ class DnsResolverProgram
             cts.Cancel();     // trigger cancellation
         };
 
-        ThreadPool.GetMaxThreads(out int workerThreads, out int completionPortThreads);
-        ThreadPool.SetMaxThreads(workerThreads, completionPortThreads);
+        // On Linux, Dns.GetHostAddressesAsync calls the blocking getaddrinfo on a thread pool thread,
+        // so each lookup holds a thread until the OS resolver answers or gives up, which can be well
+        // past --timeout. The pool starts with one thread per core and adds more only a couple of
+        // times a second, so on a small machine dnslg started fewer lookups than asked and its timers
+        // fired late. Let the pool add a thread as soon as work is waiting.
+        ThreadPool.GetMaxThreads(out int maxWorkerThreads, out _);
+        ThreadPool.GetMinThreads(out _, out int minCompletionPortThreads);
+        ThreadPool.SetMinThreads(maxWorkerThreads, minCompletionPortThreads);
 
         var tcs = new TaskCompletionSource<bool>();
 
